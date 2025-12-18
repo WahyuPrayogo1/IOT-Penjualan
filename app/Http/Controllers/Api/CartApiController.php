@@ -137,74 +137,84 @@ class CartApiController extends Controller
     }
 
     public function checkout(Request $request)
-    {
-        $request->validate([
-            'device_id' => 'required',
-            'payment_method' => 'required|in:cash,midtrans',
-            'paid_amount' => 'required_if:payment_method,cash',
-        ]);
+{
+    $request->validate([
+        'device_id' => 'required',
+        'payment_method' => 'required|in:cash,midtrans',
+        'paid_amount' => 'required_if:payment_method,cash',
+    ]);
 
-        $cart = Cart::where('device_id', $request->device_id)->with('items.product')->first();
+    $cart = Cart::where('device_id', $request->device_id)
+                ->with('items.product')
+                ->first();
 
-        if (!$cart || $cart->items->isEmpty()) {
-            return response()->json(['success' => false, 'message' => 'Cart is empty'], 400);
-        }
+    if (!$cart || $cart->items->isEmpty()) {
+        return response()->json(['success' => false, 'message' => 'Cart is empty'], 400);
+    }
 
-        // Hitung total
-        $total = 0;
-        foreach ($cart->items as $item) {
-            $total += $item->product->price * $item->quantity;
-        }
+    // Hitung total
+    $total = 0;
+    foreach ($cart->items as $item) {
+        $total += $item->product->price * $item->quantity;
+    }
 
-        // Buat sales dulu (midtrans = pending)
-        $sale = Sales::create([
-            'invoice_number' => 'INV-' . time(),
-            'customer_name' => $request->customer_name,
-            'total_amount' => $total,
-            'payment_method' => $request->payment_method,
-            'paid_amount' => $request->payment_method == 'cash' ? $request->paid_amount : 0,
-            'change_amount' => $request->payment_method == 'cash' ? $request->paid_amount - $total : 0,
-            'status' => $request->payment_method == 'cash' ? 'success' : 'pending',
-            'created_by' => auth()->id() ?? 1,
-        ]);
+    // 🔥 Validasi uang kurang
+    if ($request->payment_method == 'cash' && $request->paid_amount < $total) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Jumlah yang dibayarkan tidak cukup. Harus: ' . $total,
+        ], 400);
+    }
 
-        // ⬇ Kalau cash → langsung proses
-        if ($request->payment_method == 'cash') {
-            foreach ($cart->items as $ci) {
-                SalesItem::create([
-                    'sale_id' => $sale->id,
-                    'product_id' => $ci->product_id,
-                    'quantity' => $ci->quantity,
-                    'price' => $ci->product->price,
-                    'subtotal' => $ci->product->price * $ci->quantity,
-                ]);
+    // Buat sales dulu
+    $sale = Sales::create([
+        'invoice_number' => 'INV-' . time(),
+        'customer_name' => $request->customer_name,
+        'total_amount' => $total,
+        'payment_method' => $request->payment_method,
+        'paid_amount' => $request->payment_method == 'cash' ? $request->paid_amount : 0,
+        'change_amount' => $request->payment_method == 'cash'
+            ? $request->paid_amount - $total
+            : 0,
+        'status' => $request->payment_method == 'cash' ? 'success' : 'pending',
+        'created_by' => auth()->id() ?? 1,
+    ]);
 
-                // Kurangi stok
-                $ci->product->decrement('stock', $ci->quantity);
+    // Kalau cash → proses langsung
+    if ($request->payment_method == 'cash') {
+        foreach ($cart->items as $ci) {
+            SalesItem::create([
+                'sale_id' => $sale->id,
+                'product_id' => $ci->product_id,
+                'quantity' => $ci->quantity,
+                'price' => $ci->product->price,
+                'subtotal' => $ci->product->price * $ci->quantity,
+            ]);
 
-                // Riwayat stok
-                StockHistory::create([
-                    'product_id' => $ci->product->id,
-                    'type' => 'sale',
-                    'quantity' => $ci->quantity,
-                    'description' => 'Checkout by Cash',
-                    'reference_id' => $sale->id,
-                ]);
-            }
+            $ci->product->decrement('stock', $ci->quantity);
 
-            // Clear cart
-            $cart->items()->delete();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Checkout successful',
-                'data' => $sale->load('items.product'),
+            StockHistory::create([
+                'product_id' => $ci->product->id,
+                'type' => 'sale',
+                'quantity' => $ci->quantity,
+                'description' => 'Checkout by Cash',
+                'reference_id' => $sale->id,
             ]);
         }
 
-        // ⬇ Kalau MIDTRANS → lanjut generate Snap Token
-        return $this->checkoutMidtrans($sale, $cart);
+        $cart->items()->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Checkout successful',
+            'data' => $sale->load('items.product'),
+        ]);
     }
+
+    // Midtrans
+    return $this->checkoutMidtrans($sale, $cart);
+}
+
 
     public function updateQty(Request $request)
     {
