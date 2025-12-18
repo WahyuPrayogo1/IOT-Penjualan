@@ -157,7 +157,7 @@ class CartApiController extends Controller
         }
 
         // Buat sales dulu (midtrans = pending)
-        $sale = Sale::create([
+        $sale = Sales::create([
             'invoice_number' => 'INV-' . time(),
             'customer_name' => $request->customer_name,
             'total_amount' => $total,
@@ -171,7 +171,7 @@ class CartApiController extends Controller
         // ⬇ Kalau cash → langsung proses
         if ($request->payment_method == 'cash') {
             foreach ($cart->items as $ci) {
-                SaleItem::create([
+                SalesItem::create([
                     'sale_id' => $sale->id,
                     'product_id' => $ci->product_id,
                     'quantity' => $ci->quantity,
