@@ -21,6 +21,7 @@ class CreateSalesTable extends Migration
             $table->string('payment_method');
             $table->decimal('paid_amount', 12, 2)->nullable();
             $table->decimal('change_amount', 12, 2)->nullable();
+            $table->string('device_id')->nullable();
             $table->foreignId('created_by')->nullable()->constrained('users');
             $table->timestamps();
         });

@@ -60,6 +60,7 @@ class SalesApiController extends Controller
             'customer_name' => $request->customer_name,
             'payment_method' => $request->payment_method,
             'total_amount' => $total,
+            'device_id' => $request->device_id,
             'paid_amount' => $request->paid_amount,
             'change_amount' => $request->paid_amount - $total,
             'created_by' => auth()->id() ?? 1, // API biasanya tidak pakai login

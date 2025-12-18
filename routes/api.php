@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\CartApiController;
 
 /*
 |--------------------------------------------------------------------------
@@ -23,3 +24,14 @@ Route::get('/products/scan/{barcode}', [\App\Http\Controllers\Api\ProductApiCont
 Route::post('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'store']);
 Route::get('/sales/{id}', [\App\Http\Controllers\Api\SalesApiController::class, 'show']);
 Route::get('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'index']);
+
+Route::post('/cart/add', [CartApiController::class, 'add']);
+Route::get('/cart/{device_id}', [CartApiController::class, 'show']);
+Route::delete('/cart/item/{id}', [CartApiController::class, 'remove']);
+Route::delete('/cart/{device_id}', [CartApiController::class, 'clear']);
+
+
+Route::post('/cart/checkout', [CartApiController::class, 'checkout']);
+
+Route::post('/midtrans/callback', [PaymentController::class, 'callback']);
+Route::post('/cart/update-qty', [CartApiController::class, 'updateQty']);

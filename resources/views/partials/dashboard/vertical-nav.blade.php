@@ -64,9 +64,11 @@
         </a>
     </li>
 
+    
+    
     <!-- Stock History -->
     <li class="nav-item">
-        <a class="nav-link {{ activeRoute(route('stock-history.index')) }}" href="{{ route('stock-history.index') }}">
+        <a class="nav-link {{ activeRoute(route('cart.index')) }}" href="{{ route('cart.index') }}">
             <i class="icon">
                 <svg width="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path fill-rule="evenodd" clip-rule="evenodd"
@@ -74,7 +76,7 @@
                         fill="currentColor"></path>
                 </svg>
             </i>
-            <span class="item-name">Stock History</span>
+            <span class="item-name">Keranjang</span>
         </a>
     </li>
 

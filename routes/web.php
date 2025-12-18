@@ -17,6 +17,7 @@ use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Artisan;
 // Packages
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\CartWebController;
 
 /*
 |--------------------------------------------------------------------------
@@ -66,6 +67,11 @@ Route::group(['middleware' => 'auth'], function () {
     Route::get('/stock-history', [StockHistoryController::class, 'index'])
         ->name('stock-history.index');
     });
+
+
+    Route::get('/carts', [CartWebController::class, 'index'])->name('cart.index');
+    Route::get('/carts/{device_id}', [CartWebController::class, 'detail'])->name('cart.detail');
+
 
 //App Details Page => 'Dashboard'], function() {
 Route::group(['prefix' => 'menu-style'], function() {
