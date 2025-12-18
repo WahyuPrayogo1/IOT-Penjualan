@@ -201,33 +201,6 @@ class CartApiController extends Controller
         return $this->checkoutMidtrans($sale, $cart);
     }
 
-    public function checkoutMidtrans($sale, $cart)
-    {
-        \Midtrans\Config::$serverKey = env('MIDTRANS_SERVER_KEY');
-        \Midtrans\Config::$isProduction = false;
-        \Midtrans\Config::$isSanitized = true;
-        \Midtrans\Config::$is3ds = true;
-
-        $payload = [
-            'transaction_details' => [
-                'order_id' => $sale->invoice_number,
-                'gross_amount' => $sale->total_amount,
-            ],
-            'customer_details' => [
-                'first_name' => $sale->customer_name ?? 'Customer',
-            ],
-        ];
-
-        $snapToken = \Midtrans\Snap::getSnapToken($payload);
-
-        return response()->json([
-            'success' => true,
-            'payment' => 'midtrans',
-            'snap_token' => $snapToken,
-            'invoice' => $sale->invoice_number,
-        ]);
-    }
-
     public function updateQty(Request $request)
     {
         $request->validate([
@@ -248,4 +221,80 @@ class CartApiController extends Controller
             'message' => 'Quantity updated',
         ]);
     }
+
+public function checkoutMidtrans(Request $request)
+{
+    $request->validate([
+        'device_id' => 'required',
+        'customer_name' => 'nullable|string',
+    ]);
+
+    $cart = Cart::where('device_id', $request->device_id)
+                ->with('items.product')
+                ->first();
+
+    if (!$cart || $cart->items->isEmpty()) {
+        return response()->json([
+            "success" => false,
+            "message" => "Cart is empty"
+        ], 400);
+    }
+
+    // Hitung total
+    $total = 0;
+    foreach ($cart->items as $item) {
+        $total += $item->product->price * $item->quantity;
+    }
+
+    // Generate invoice
+    $invoice = "INV-" . time();
+
+    // 1. SIMPAN SALE STATUS PENDING
+    $sale = Sales::create([
+        'invoice_number' => $invoice,
+        'customer_name'  => $request->customer_name,
+        'payment_method' => 'midtrans',
+        'total_amount'   => $total,
+        'paid_amount'    => 0,
+        'change_amount'  => 0,
+        'created_by'     => null,
+    ]);
+
+    // 2. Simpan SALE ITEMS (stok jangan dikurangi dulu!)
+    foreach ($cart->items as $ci) {
+        SalesItem::create([
+            'sale_id'    => $sale->id,
+            'product_id' => $ci->product_id,
+            'quantity'   => $ci->quantity,
+            'price'      => $ci->product->price,
+            'subtotal'   => $ci->product->price * $ci->quantity,
+        ]);
+    }
+
+    // 3. Buat SNAP TOKEN Midtrans
+    Config::$serverKey = env('MIDTRANS_SERVER_KEY');
+    Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
+    Config::$isSanitized = true;
+    Config::$is3ds = true;
+
+    $snapToken = Snap::getSnapToken([
+        'transaction_details' => [
+            'order_id' => $invoice,
+            'gross_amount' => $total,
+        ],
+        'customer_details' => [
+            'first_name' => $request->customer_name ?? 'Customer',
+        ],
+    ]);
+
+    return response()->json([
+        "success"     => true,
+        "message"     => "Checkout created",
+        "invoice"     => $invoice,
+        "total"       => $total,
+        "snap_token"  => $snapToken
+    ]);
+}
+
+
 }

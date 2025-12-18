@@ -35,3 +35,5 @@ Route::post('/cart/checkout', [CartApiController::class, 'checkout']);
 
 Route::post('/midtrans/callback', [PaymentController::class, 'callback']);
 Route::post('/cart/update-qty', [CartApiController::class, 'updateQty']);
+Route::post('/cart/checkout-midtrans', [CartApiController::class, 'checkoutMidtrans']);
+
