@@ -11,75 +11,73 @@ use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-    public function callback(Request $request)
-    {
-        $serverKey = env('MIDTRANS_SERVER_KEY');
+// PaymentController.php
+public function callback(Request $request)
+{
+    $serverKey = env('MIDTRANS_SERVER_KEY');
+    $hashed = hash("sha512", 
+        $request->order_id . 
+        $request->status_code . 
+        $request->gross_amount . 
+        $serverKey
+    );
 
-        // Validate signature
-        $signature = hash('sha512', 
-            $request->order_id . 
-            $request->status_code . 
-            $request->gross_amount . 
-            $serverKey
-        );
+    if ($hashed != $request->signature_key) {
+        return response()->json(['message' => 'Invalid signature'], 401);
+    }
 
-        if ($signature !== $request->signature_key) {
-            return response()->json(['success' => false, 'message' => 'Invalid signature'], 403);
-        }
+    $transactionStatus = $request->transaction_status;
+    $orderId = $request->order_id;
 
-        // Ambil sales berdasarkan invoice
-        $sale = Sales::where('invoice_number', $request->order_id)->first();
+    // Cari sale berdasarkan invoice_number
+    $sale = Sales::where('invoice_number', $orderId)->first();
 
-        if (!$sale) {
-            return response()->json(['success' => false, 'message' => 'Sale not found'], 404);
-        }
+    if (!$sale) {
+        return response()->json(['message' => 'Sale not found'], 404);
+    }
 
-        // Jika sukses dari Midtrans
-        if ($request->transaction_status === 'capture' || $request->transaction_status === 'settlement') {
+    if ($transactionStatus == 'settlement' || $transactionStatus == 'capture') {
+        // Pembayaran sukses
+        $sale->update([
+            'status' => 'success',
+            'paid_amount' => $request->gross_amount,
+        ]);
 
-            // Update sales
-            $sale->update([
-                'status' => 'success',
-                'paid_amount' => $sale->total_amount,
-                'change_amount' => 0,
-            ]);
-
-            // Ambil cart berdasarkan device_id awal
-            $cart = Cart::where('device_id', $sale->device_id)->with('items.product')->first();
-
-            if ($cart) {
-                foreach ($cart->items as $ci) {
-
-                    // Buat sales item
-                    SalesItem::create([
-                        'sale_id' => $sale->id,
-                        'product_id' => $ci->product_id,
-                        'quantity' => $ci->quantity,
-                        'price' => $ci->product->price,
-                        'subtotal' => $ci->product->price * $ci->quantity,
-                    ]);
-
-                    // Kurangi stok
-                    $ci->product->decrement('stock', $ci->quantity);
-
-                    // Catat history stok
-                    StockHistory::create([
-                        'product_id' => $ci->product_id,
-                        'type' => 'sale',
-                        'quantity' => $ci->quantity,
-                        'description' => 'Midtrans Payment',
-                        'reference_id' => $sale->id,
-                    ]);
-                }
-
-                // Bersihkan cart
-                $cart->items()->delete();
+        // Kurangi stok produk
+        $saleItems = SalesItem::where('sale_id', $sale->id)->get();
+        
+        foreach ($saleItems as $item) {
+            $product = Product::find($item->product_id);
+            if ($product) {
+                $product->decrement('stock', $item->quantity);
+                
+                StockHistory::create([
+                    'product_id' => $product->id,
+                    'type' => 'sale',
+                    'quantity' => $item->quantity,
+                    'description' => 'Midtrans Payment: ' . $orderId,
+                    'reference_id' => $sale->id,
+                ]);
             }
         }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Callback processed'
-        ]);
+        // Clear cart berdasarkan device_id
+        $cart = Cart::where('device_id', $sale->device_id)->first();
+        if ($cart) {
+            $cart->items()->delete();
+        }
+
+        return response()->json(['message' => 'Payment success']);
+
+    } elseif ($transactionStatus == 'pending') {
+        $sale->update(['status' => 'pending']);
+        return response()->json(['message' => 'Payment pending']);
+
+    } elseif ($transactionStatus == 'deny' || $transactionStatus == 'cancel' || $transactionStatus == 'expire') {
+        $sale->update(['status' => 'failed']);
+        return response()->json(['message' => 'Payment failed']);
     }
+
+    return response()->json(['message' => 'Unknown status']);
+}
 }

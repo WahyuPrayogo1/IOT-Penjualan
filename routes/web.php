@@ -6,7 +6,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SalesController;
 use App\Http\Controllers\SalesItemController;
 use App\Http\Controllers\StockHistoryController;
-
+use App\Http\Controllers\DeviceController;
 // 
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\RuleController;
@@ -42,6 +42,20 @@ Route::get('/storage', function () {
 Route::get('/', [HomeController::class, 'uisheet'])->name('uisheet');
 
 Route::group(['middleware' => 'auth'], function () {
+
+// routes/web.php
+Route::prefix('devices')->group(function () {
+    Route::get('/', [DeviceController::class, 'index'])->name('devices.index');
+    Route::get('/create', [DeviceController::class, 'create'])->name('devices.create');
+    Route::post('/', [DeviceController::class, 'store'])->name('devices.store');
+    Route::get('/{id}/edit', [DeviceController::class, 'edit'])->name('devices.edit');
+    Route::put('/{id}', [DeviceController::class, 'update'])->name('devices.update');
+    Route::delete('/{id}', [DeviceController::class, 'destroy'])->name('devices.destroy');
+    Route::get('/generate-qr', [DeviceController::class, 'generateQRCodes'])->name('devices.generate-qr');
+    Route::get('/print-all', [DeviceController::class, 'printAllQRCodes'])->name('devices.print-all');
+});
+
+
     // Permission Module
     Route::get('/role-permission',[RolePermission::class, 'index'])->name('role.permission.list');
     Route::resource('permission',PermissionController::class);
@@ -151,6 +165,7 @@ Route::group(['prefix' => 'icons'], function() {
     Route::get('dualtone', [HomeController::class, 'dualtone'])->name('icons.dualtone');
     Route::get('colored', [HomeController::class, 'colored'])->name('icons.colored');
 });
+
 //Extra Page Routs
 Route::get('privacy-policy', [HomeController::class, 'privacypolicy'])->name('pages.privacy-policy');
 Route::get('terms-of-use', [HomeController::class, 'termsofuse'])->name('pages.term-of-use');

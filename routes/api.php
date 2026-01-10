@@ -16,17 +16,29 @@ Route::post('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'sto
 Route::get('/sales/{id}', [\App\Http\Controllers\Api\SalesApiController::class, 'show']);
 Route::get('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'index']);
 
-Route::post('/cart/add', [CartApiController::class, 'add']);
-Route::get('/cart/{device_id}', [CartApiController::class, 'show']);
-Route::delete('/cart/item/{id}', [CartApiController::class, 'remove']);
-Route::delete('/cart/{device_id}', [CartApiController::class, 'clear']);
+    // Cart API Routes
+    Route::prefix('cart')->group(function () {
+        // Get cart by device_id
+        Route::get('/{device_id}', [CartApiController::class, 'show']);
+        
+        // Add item (from IOT scanner)
+        Route::post('/add', [CartApiController::class, 'add']);
+        
+        // Update quantity (from mobile)
+        Route::post('/update-quantity', [CartApiController::class, 'updateQuantity']);
+        
+        // Remove item - HARUS dengan device_id validasi
+        Route::post('/remove-item', [CartApiController::class, 'remove']);
 
+        // Clear cart - spesifik route
+        Route::post('/clear', [CartApiController::class, 'clear']);
+        
+        // Pembayaran Cash dan Midtrans
+            Route::post('checkout', [CartApiController::class, 'checkout']); // Untuk CASH
+            Route::post('checkout/midtrans', [CartApiController::class, 'checkoutMidtrans']); // Untuk MIDTRANS
+        // End Pembayaran Cash dan Midtrans
+    });
 
-Route::post('/cart/checkout', [CartApiController::class, 'checkout']);
-
-Route::post('/midtrans/callback', [PaymentController::class, 'callback']);
-Route::post('/cart/update-qty', [CartApiController::class, 'updateQty']);
-Route::post('/cart/checkout-midtrans', [CartApiController::class, 'checkoutMidtrans']);
 
 Route::get('/config/version', [ConfigApiController::class, 'version']);
 Route::get('/config', [ConfigApiController::class, 'index']);
