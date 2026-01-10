@@ -326,17 +326,17 @@ public function checkout(Request $request)
 {
     $request->validate([
         'device_id' => 'required',
-        'payment_method' => 'required|in:cash,midtrans', // Tetap ada midtrans option
+        'payment_method' => 'required|in:cash,midtrans',
         'paid_amount' => 'required_if:payment_method,cash',
         'customer_name' => 'nullable|string',
     ]);
 
-    // JIKA MIDTRANS → Redirect ke endpoint midtrans
+    // Jika midtrans, redirect ke checkoutMidtrans
     if ($request->payment_method == 'midtrans') {
         return $this->checkoutMidtrans($request);
     }
 
-    // LOGIC CASH (tetap sama seperti sebelumnya)
+    // LOGIC CASH
     $cart = Cart::where('device_id', $request->device_id)
                 ->with('items.product')
                 ->first();
@@ -359,15 +359,18 @@ public function checkout(Request $request)
         ], 400);
     }
 
-    // Buat sales
+    // Buat sales dengan status completed
     $sale = Sales::create([
-        'invoice_number' => 'INV-' . time(),
+        'invoice_number' => 'INV-' . time() . '-' . rand(100, 999),
         'customer_name' => $request->customer_name,
+        'device_id' => $request->device_id,
+        'cart_id' => $cart->id, // Simpan cart_id
         'total_amount' => $total,
         'payment_method' => 'cash',
         'paid_amount' => $request->paid_amount,
         'change_amount' => $request->paid_amount - $total,
-        'status' => 'success',
+        'status' => 'completed', // Status langsung completed
+        'paid_at' => now(), // Langsung paid
         'created_by' => auth()->id() ?? 1,
     ]);
 
@@ -381,13 +384,14 @@ public function checkout(Request $request)
             'subtotal' => $ci->product->price * $ci->quantity,
         ]);
 
+        // Kurangi stok
         $ci->product->decrement('stock', $ci->quantity);
 
         StockHistory::create([
             'product_id' => $ci->product->id,
             'type' => 'sale',
             'quantity' => $ci->quantity,
-            'description' => 'Checkout by Cash',
+            'description' => 'Cash Payment: ' . $sale->invoice_number,
             'reference_id' => $sale->id,
         ]);
     }
@@ -398,7 +402,14 @@ public function checkout(Request $request)
     return response()->json([
         'success' => true,
         'message' => 'Checkout successful',
-        'data' => $sale->load('items.product'),
+        'data' => [
+            'invoice_number' => $sale->invoice_number,
+            'total' => $total,
+            'paid_amount' => $request->paid_amount,
+            'change_amount' => $request->paid_amount - $total,
+            'items_count' => $cart->items->count(),
+            'sale_id' => $sale->id,
+        ]
     ]);
 }
 
@@ -427,12 +438,14 @@ public function checkoutMidtrans(Request $request)
     }
 
     // Generate invoice
-    $invoice = "INV-" . time();
+    $invoice = "INV-" . time() . "-" . rand(100, 999);
 
-    // 1. SIMPAN SALE STATUS PENDING
+    // SIMPAN SALE DENGAN STATUS PENDING
     $sale = Sales::create([
         'invoice_number' => $invoice,
         'customer_name'  => $request->customer_name,
+        'device_id'      => $request->device_id,
+        'cart_id'        => $cart->id, // Simpan cart_id
         'payment_method' => 'midtrans',
         'total_amount'   => $total,
         'paid_amount'    => 0,
@@ -441,7 +454,7 @@ public function checkoutMidtrans(Request $request)
         'created_by'     => auth()->id() ?? null,
     ]);
 
-    // 2. Simpan SALE ITEMS (stok jangan dikurangi dulu!)
+    // Simpan SALE ITEMS (stok jangan dikurangi dulu!)
     foreach ($cart->items as $ci) {
         SalesItem::create([
             'sale_id'    => $sale->id,
@@ -452,7 +465,10 @@ public function checkoutMidtrans(Request $request)
         ]);
     }
 
-    // 3. Buat SNAP TOKEN Midtrans
+    // LOCK CART (tidak bisa di-edit selama pending)
+    $cart->update(['is_locked' => true]);
+
+    // Buat SNAP TOKEN Midtrans
     Config::$serverKey = env('MIDTRANS_SERVER_KEY');
     Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
     Config::$isSanitized = true;
@@ -465,23 +481,165 @@ public function checkoutMidtrans(Request $request)
         ],
         'customer_details' => [
             'first_name' => $request->customer_name ?? 'Customer',
+            'email' => $request->customer_email ?? 'customer@example.com',
+            'phone' => $request->customer_phone ?? '08123456789',
         ],
+        'item_details' => $this->getMidtransItemDetails($cart),
     ]);
 
-    // 4. JANGAN CLEAR CART DULU! Tunggu callback dari Midtrans
-    // $cart->items()->delete(); // ❌ JANGAN DIHAPUS
+    // Simpan snap_token ke sale
+    $sale->update([
+        'midtrans_data' => json_encode(['snap_token' => $snapToken])
+    ]);
 
     return response()->json([
         "success"     => true,
-        "message"     => "Checkout created",
+        "message"     => "Payment initiated. Please complete payment.",
         "invoice"     => $invoice,
         "total"       => $total,
         "snap_token"  => $snapToken,
-        "sale_id"     => $sale->id // Tambahkan sale_id untuk reference
+        "sale_id"     => $sale->id,
+        "payment_url" => "https://app.sandbox.midtrans.com/snap/v2/vtweb/" . $snapToken,
+        "notes"       => "Cart is locked until payment completed or failed"
     ]);
 }
 
+// Fungsi tambahan untuk item details Midtrans
+private function getMidtransItemDetails($cart)
+{
+    $items = [];
+    
+    foreach ($cart->items as $item) {
+        $items[] = [
+            'id' => $item->product->barcode,
+            'price' => (int)$item->product->price,
+            'quantity' => (int)$item->quantity,
+            'name' => $item->product->name,
+        ];
+    }
+    
+    return $items;
+}
 
 
+// Tambahkan di CartApiController.php, setelah function checkoutMidtrans()
+public function midtransCallback(Request $request)
+{
+    \Log::info('Midtrans Callback Received', $request->all());
+    
+    // 1. Ambil data dari Midtrans
+    $orderId = $request->order_id; // Ini adalah invoice_number Anda (contoh: INV-1768037463-271)
+    $transactionStatus = $request->transaction_status;
+    $grossAmount = $request->gross_amount;
+    $signatureKey = $request->signature_key;
+    
+    // 2. Validasi signature key
+    $serverKey = env('MIDTRANS_SERVER_KEY');
+    $mySignatureKey = hash('sha512', $orderId . $request->status_code . $grossAmount . $serverKey);
+    
+    if ($mySignatureKey !== $signatureKey) {
+        \Log::error('Invalid Midtrans signature', [
+            'received' => $signatureKey,
+            'calculated' => $mySignatureKey
+        ]);
+        return response()->json(['message' => 'Invalid signature'], 401);
+    }
+    
+    // 3. Cari transaksi di database berdasarkan invoice_number
+    $sale = Sales::where('invoice_number', $orderId)->first();
+    
+    if (!$sale) {
+        \Log::error('Sale not found for Midtrans callback', ['order_id' => $orderId]);
+        return response()->json(['message' => 'Sale not found'], 404);
+    }
+    
+    // 4. Proses berdasarkan status transaksi
+    switch ($transactionStatus) {
+        case 'capture':
+        case 'settlement':
+            // PEMBAYARAN SUKSES
+            $this->handleSuccessfulPayment($sale, $request);
+            break;
+            
+        case 'pending':
+            // MASIH PENDING
+            $sale->update([
+                'status' => 'pending',
+                'midtrans_data' => json_encode($request->all())
+            ]);
+            break;
+            
+        case 'deny':
+        case 'cancel':
+        case 'expire':
+        case 'failure':
+            // PEMBAYARAN GAGAL
+            $this->handleFailedPayment($sale, $request);
+            break;
+            
+        default:
+            \Log::warning('Unknown Midtrans status', ['status' => $transactionStatus]);
+    }
+    
+    return response()->json(['message' => 'OK']);
+}
+
+private function handleSuccessfulPayment($sale, $request)
+{
+    // 1. Update data transaksi
+    $sale->update([
+        'status' => 'completed',
+        'paid_amount' => $request->gross_amount,
+        'paid_at' => now(),
+        'midtrans_data' => json_encode($request->all()),
+        'midtrans_transaction_id' => $request->transaction_id,
+        'midtrans_payment_type' => $request->payment_type
+    ]);
+    
+    // 2. Kurangi stok produk
+    $cart = Cart::find($sale->cart_id);
+    
+    if ($cart) {
+        foreach ($cart->items as $item) {
+            $product = Product::find($item->product_id);
+            if ($product) {
+                // Kurangi stok
+                $product->decrement('stock', $item->quantity);
+                
+                // Catat history stok
+                StockHistory::create([
+                    'product_id' => $product->id,
+                    'type' => 'sale',
+                    'quantity' => $item->quantity,
+                    'description' => 'Midtrans Payment: ' . $sale->invoice_number,
+                    'reference_id' => $sale->id
+                ]);
+            }
+        }
+        
+        // 3. Hapus item cart dan unlock
+        $cart->items()->delete();
+        $cart->update(['is_locked' => false]);
+    }
+    
+    \Log::info('Payment success processed', ['sale_id' => $sale->id]);
+}
+
+private function handleFailedPayment($sale, $request)
+{
+    $sale->update([
+        'status' => 'failed',
+        'failed_at' => now(),
+        'midtrans_data' => json_encode($request->all())
+    ]);
+    
+    // Unlock cart jika gagal
+    $cart = Cart::find($sale->cart_id);
+    if ($cart) {
+        $cart->update(['is_locked' => false]);
+    }
+    
+    \Log::info('Payment failed processed', ['sale_id' => $sale->id]);
+}
 
 }

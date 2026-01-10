@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\CartApiController;
 use App\Http\Controllers\Api\ConfigApiController;
+use App\Http\Controllers\Api\PaymentController;
 
 
 Route::middleware('auth:api')->get('/user', function (Request $request) {
@@ -15,6 +16,13 @@ Route::get('/products/scan/{barcode}', [\App\Http\Controllers\Api\ProductApiCont
 Route::post('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'store']);
 Route::get('/sales/{id}', [\App\Http\Controllers\Api\SalesApiController::class, 'show']);
 Route::get('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'index']);
+
+
+// Midtrans callback (harus public, tidak pakai auth)
+Route::post('/midtrans/callback', [PaymentController::class, 'midtransCallback']);
+
+// Check payment status
+Route::get('/payment/status/{invoice}', [PaymentController::class, 'checkStatus']);
 
     // Cart API Routes
     Route::prefix('cart')->group(function () {
@@ -34,10 +42,18 @@ Route::get('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'inde
         Route::post('/clear', [CartApiController::class, 'clear']);
         
         // Pembayaran Cash dan Midtrans
-            Route::post('checkout', [CartApiController::class, 'checkout']); // Untuk CASH
-            Route::post('checkout/midtrans', [CartApiController::class, 'checkoutMidtrans']); // Untuk MIDTRANS
+            Route::post('/checkout', [CartApiController::class, 'checkout']);
+            Route::post('/checkout-midtrans', [CartApiController::class, 'checkoutMidtrans']);
         // End Pembayaran Cash dan Midtrans
     });
+
+    // Payment routes
+    Route::prefix('payment')->group(function () {
+        Route::get('/status/{invoice}', [PaymentController::class, 'checkStatus']);
+        Route::get('/pending/{device_id}', [PaymentController::class, 'listPendingPayments']);
+        Route::post('/cancel', [PaymentController::class, 'cancelPayment']);
+    });
+    Route::post('/midtrans/callback', [App\Http\Controllers\Api\CartApiController::class, 'midtransCallback']);
 
 
 Route::get('/config/version', [ConfigApiController::class, 'version']);

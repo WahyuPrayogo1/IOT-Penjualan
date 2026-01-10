@@ -4,80 +4,116 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Sales;
-use App\Models\SalesItem;
-use App\Models\StockHistory;
 use App\Models\Cart;
 use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-// PaymentController.php
-public function callback(Request $request)
-{
-    $serverKey = env('MIDTRANS_SERVER_KEY');
-    $hashed = hash("sha512", 
-        $request->order_id . 
-        $request->status_code . 
-        $request->gross_amount . 
-        $serverKey
-    );
-
-    if ($hashed != $request->signature_key) {
-        return response()->json(['message' => 'Invalid signature'], 401);
-    }
-
-    $transactionStatus = $request->transaction_status;
-    $orderId = $request->order_id;
-
-    // Cari sale berdasarkan invoice_number
-    $sale = Sales::where('invoice_number', $orderId)->first();
-
-    if (!$sale) {
-        return response()->json(['message' => 'Sale not found'], 404);
-    }
-
-    if ($transactionStatus == 'settlement' || $transactionStatus == 'capture') {
-        // Pembayaran sukses
-        $sale->update([
-            'status' => 'success',
-            'paid_amount' => $request->gross_amount,
-        ]);
-
-        // Kurangi stok produk
-        $saleItems = SalesItem::where('sale_id', $sale->id)->get();
+    // Check payment status
+    public function checkStatus($invoice)
+    {
+        $sale = Sales::where('invoice_number', $invoice)->first();
         
-        foreach ($saleItems as $item) {
-            $product = Product::find($item->product_id);
-            if ($product) {
-                $product->decrement('stock', $item->quantity);
-                
-                StockHistory::create([
-                    'product_id' => $product->id,
-                    'type' => 'sale',
-                    'quantity' => $item->quantity,
-                    'description' => 'Midtrans Payment: ' . $orderId,
-                    'reference_id' => $sale->id,
-                ]);
+        if (!$sale) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invoice not found: ' . $invoice
+            ], 404);
+        }
+        
+        $response = [
+            'success' => true,
+            'invoice' => $invoice,
+            'status' => $sale->status,
+            'payment_method' => $sale->payment_method,
+            'total' => (float)$sale->total_amount,
+            'device_id' => $sale->device_id,
+            'created_at' => $sale->created_at->format('Y-m-d H:i:s'),
+        ];
+        
+        // Tambah data berdasarkan status
+        if ($sale->status == 'completed') {
+            $response['paid_at'] = $sale->paid_at->format('Y-m-d H:i:s');
+            $response['paid_amount'] = (float)$sale->paid_amount;
+            $response['change_amount'] = (float)$sale->change_amount;
+        } elseif ($sale->status == 'failed') {
+            $response['failed_at'] = $sale->failed_at->format('Y-m-d H:i:s');
+            $response['reason'] = 'Payment failed';
+        }
+        
+        // Cek cart
+        if ($sale->cart_id) {
+            $cart = Cart::find($sale->cart_id);
+            if ($cart) {
+                $response['cart'] = [
+                    'id' => $cart->id,
+                    'is_locked' => (bool)$cart->is_locked,
+                    'items_count' => $cart->items()->count()
+                ];
             }
         }
-
-        // Clear cart berdasarkan device_id
-        $cart = Cart::where('device_id', $sale->device_id)->first();
-        if ($cart) {
-            $cart->items()->delete();
-        }
-
-        return response()->json(['message' => 'Payment success']);
-
-    } elseif ($transactionStatus == 'pending') {
-        $sale->update(['status' => 'pending']);
-        return response()->json(['message' => 'Payment pending']);
-
-    } elseif ($transactionStatus == 'deny' || $transactionStatus == 'cancel' || $transactionStatus == 'expire') {
-        $sale->update(['status' => 'failed']);
-        return response()->json(['message' => 'Payment failed']);
+        
+        return response()->json($response);
     }
-
-    return response()->json(['message' => 'Unknown status']);
-}
+    
+    // List all pending payments for a device
+    public function listPendingPayments($device_id)
+    {
+        $pendingSales = Sales::where('device_id', $device_id)
+                            ->where('status', 'pending')
+                            ->orderBy('created_at', 'desc')
+                            ->get(['invoice_number', 'total_amount', 'created_at']);
+        
+        return response()->json([
+            'success' => true,
+            'device_id' => $device_id,
+            'pending_count' => $pendingSales->count(),
+            'pending_payments' => $pendingSales
+        ]);
+    }
+    
+    // Cancel pending payment
+    public function cancelPayment(Request $request)
+    {
+        $request->validate([
+            'invoice' => 'required',
+            'device_id' => 'required'
+        ]);
+        
+        $sale = Sales::where('invoice_number', $request->invoice)
+                    ->where('device_id', $request->device_id)
+                    ->first();
+        
+        if (!$sale) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invoice not found'
+            ], 404);
+        }
+        
+        if ($sale->status != 'pending') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only pending payments can be cancelled'
+            ], 400);
+        }
+        
+        // Update sale status
+        $sale->update([
+            'status' => 'cancelled',
+            'failed_at' => now()
+        ]);
+        
+        // Unlock cart
+        if ($sale->cart_id) {
+            Cart::where('id', $sale->cart_id)->update(['is_locked' => false]);
+        }
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Payment cancelled',
+            'invoice' => $request->invoice,
+            'new_status' => 'cancelled'
+        ]);
+    }
 }
