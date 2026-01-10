@@ -12,32 +12,81 @@ use Yajra\DataTables\Facades\DataTables;
 
 class SalesController extends Controller
 {
-    public function index(Request $request)
+public function index(Request $request)
 {
     if ($request->ajax()) {
-        $sales = Sales::select('*');
+        $sales = Sales::select([
+            'id',
+            'invoice_number',
+            'customer_name',
+            'total_amount',
+            'payment_method',
+            'status',           // Pastikan ada kolom ini
+            'device_id',        // Tambah jika perlu
+            'created_at',
+            'paid_at'           // Untuk info kapan dibayar
+        ]);
 
         return DataTables::of($sales)
             ->addIndexColumn()
             ->addColumn('date', function($row){
-                return $row->created_at->format('d/m/Y');
+                return $row->created_at->format('d/m/Y H:i');
             })
+            ->addColumn('formatted_total', function($row){
+                return 'Rp ' . number_format($row->total_amount, 0, ',', '.');
+            })
+           // In your DataTables code in index method:
+->addColumn('status_badge', function($row){
+    // Render badge status
+    if ($row->status === 'completed') {
+        $badge = '<span class="badge bg-success">Completed</span>';
+        if ($row->paid_at) {
+            // Fix: Parse the paid_at string to Carbon object before formatting
+            $paidAt = \Carbon\Carbon::parse($row->paid_at);
+            $badge .= '<br><small>Paid: ' . $paidAt->format('d/m/Y H:i') . '</small>';
+        }
+    } elseif ($row->status === 'pending') {
+        $badge = '<span class="badge bg-warning">Pending</span>';
+    } elseif ($row->status === 'failed') {
+        $badge = '<span class="badge bg-danger">Failed</span>';
+    } elseif ($row->status === 'cancelled') {
+        $badge = '<span class="badge bg-secondary">Cancelled</span>';
+    } else {
+        $badge = '<span class="badge bg-info">' . $row->status . '</span>';
+    }
+    return $badge;
+})
             ->addColumn('action', function($row){
-                return '
+                $buttons = '
                     <a href="'.route('sales.show',$row->id).'" class="btn btn-sm btn-info">Detail</a>
+                ';
+                
+                // Tambah tombol cancel hanya untuk pending
+                if ($row->status === 'pending' && $row->payment_method === 'midtrans') {
+                    $buttons .= '
+                        <button class="btn btn-sm btn-warning cancel-payment" 
+                                data-id="'.$row->id.'" 
+                                data-invoice="'.$row->invoice_number.'">
+                            Cancel
+                        </button>
+                    ';
+                }
+                
+                $buttons .= '
                     <form action="'.route('sales.destroy', $row->id).'" method="POST" style="display:inline-block">
                         '.csrf_field().method_field('DELETE').'
-                        <button class="btn btn-sm btn-danger" onclick="return confirm(\'Hapus?\')">Delete</button>
+                        <button class="btn btn-sm btn-danger" onclick="return confirm(\'Hapus transaksi ini?\')">Delete</button>
                     </form>
                 ';
+                
+                return $buttons;
             })
-            ->rawColumns(['action'])
+            ->rawColumns(['action', 'status_badge']) // TAMBAH 'status_badge' di sini
             ->make(true);
     }
 
     return view('backend.sales.index');
 }
-
 
     public function create()
     {

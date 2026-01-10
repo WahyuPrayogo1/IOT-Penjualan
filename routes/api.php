@@ -21,8 +21,6 @@ Route::get('/sales', [\App\Http\Controllers\Api\SalesApiController::class, 'inde
 // Midtrans callback (harus public, tidak pakai auth)
 Route::post('/midtrans/callback', [PaymentController::class, 'midtransCallback']);
 
-// Check payment status
-Route::get('/payment/status/{invoice}', [PaymentController::class, 'checkStatus']);
 
     // Cart API Routes
     Route::prefix('cart')->group(function () {

@@ -72,48 +72,41 @@ class PaymentController extends Controller
         ]);
     }
     
-    // Cancel pending payment
-    public function cancelPayment(Request $request)
-    {
-        $request->validate([
-            'invoice' => 'required',
-            'device_id' => 'required'
-        ]);
-        
-        $sale = Sales::where('invoice_number', $request->invoice)
-                    ->where('device_id', $request->device_id)
-                    ->first();
-        
-        if (!$sale) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invoice not found'
-            ], 404);
-        }
-        
-        if ($sale->status != 'pending') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only pending payments can be cancelled'
-            ], 400);
-        }
-        
-        // Update sale status
-        $sale->update([
-            'status' => 'cancelled',
-            'failed_at' => now()
-        ]);
-        
-        // Unlock cart
-        if ($sale->cart_id) {
-            Cart::where('id', $sale->cart_id)->update(['is_locked' => false]);
-        }
-        
+
+public function cancelPayment(Request $request)
+{
+    $request->validate([
+        'sale_id' => 'required|exists:sales,id',
+        'invoice' => 'required'
+    ]);
+    
+    $sale = Sales::find($request->sale_id);
+    
+    if ($sale->status !== 'pending') {
         return response()->json([
-            'success' => true,
-            'message' => 'Payment cancelled',
-            'invoice' => $request->invoice,
-            'new_status' => 'cancelled'
-        ]);
+            'success' => false,
+            'message' => 'Only pending payments can be cancelled'
+        ], 400);
     }
+    
+    // Update sale status
+    $sale->update([
+        'status' => 'cancelled',
+        'failed_at' => now()
+    ]);
+    
+    // Unlock cart jika ada
+    if ($sale->cart_id) {
+        $cart = Cart::find($sale->cart_id);
+        if ($cart) {
+            $cart->update(['is_locked' => false]);
+        }
+    }
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Payment cancelled successfully',
+        'invoice' => $sale->invoice_number
+    ]);
+}
 }
