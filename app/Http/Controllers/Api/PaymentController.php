@@ -27,18 +27,59 @@ public function checkStatus($invoice)
         'payment_method' => $sale->payment_method,
         'total' => (float)$sale->total_amount,
         'device_id' => $sale->device_id,
-        // Gunakan null-safe operator
         'created_at' => $sale->created_at ? $sale->created_at->format('Y-m-d H:i:s') : null,
     ];
     
-    // Tambah data berdasarkan status DENGAN NULL CHECK
+    // **TAMBAHKAN DATA MIDTRANS JIKA ADA**
+    $midtransData = $sale->midtrans_data ? json_decode($sale->midtrans_data, true) : [];
+    
+    if ($sale->payment_method == 'midtrans') {
+        $snapToken = $midtransData['snap_token'] ?? null;
+        
+        $response['midtrans'] = [
+            'has_token' => !empty($snapToken),
+            'transaction_id' => $sale->midtrans_transaction_id,
+            'payment_type' => $sale->midtrans_payment_type,
+            'data_available' => !empty($midtransData),
+        ];
+        
+        // Hanya berikan payment_url jika status masih pending dan ada token
+        if ($sale->status == 'pending' && $snapToken) {
+            $response['payment_url'] = "https://app.sandbox.midtrans.com/snap/v2/vtweb/" . $snapToken;
+            $response['snap_token'] = $snapToken;
+            
+            // Hitung waktu kadaluarsa (24 jam dari created_at)
+            if ($sale->created_at) {
+                $expiredAt = $sale->created_at->addHours(24);
+                $response['payment_expired'] = $expiredAt->format('Y-m-d H:i:s');
+                $response['payment_expired_timestamp'] = $expiredAt->timestamp;
+                
+                // Tambah status expired jika melewati batas waktu
+                if (now()->greaterThan($expiredAt)) {
+                    $response['payment_status'] = 'expired';
+                } else {
+                    $response['payment_status'] = 'active';
+                }
+            }
+        }
+    }
+    
+    // Tambah data berdasarkan status
     if ($sale->status == 'completed') {
         $response['paid_at'] = $sale->paid_at ? $sale->paid_at->format('Y-m-d H:i:s') : null;
         $response['paid_amount'] = (float)$sale->paid_amount;
         $response['change_amount'] = (float)$sale->change_amount;
+        
+        // Tambah success page URL
+        $response['success_url'] = url('/payment/success?invoice=' . $invoice);
+        
     } elseif ($sale->status == 'failed') {
         $response['failed_at'] = $sale->failed_at ? $sale->failed_at->format('Y-m-d H:i:s') : null;
         $response['reason'] = 'Payment failed';
+        
+    } elseif ($sale->status == 'pending') {
+        $response['pending_since'] = $sale->created_at ? $sale->created_at->format('Y-m-d H:i:s') : null;
+        $response['instruction'] = 'Please complete the payment using the provided payment URL';
     }
     
     // Cek cart
@@ -48,14 +89,14 @@ public function checkStatus($invoice)
             $response['cart'] = [
                 'id' => $cart->id,
                 'is_locked' => (bool)$cart->is_locked,
-                'items_count' => $cart->items()->count()
+                'items_count' => $cart->items()->count(),
+                'locked_status' => $cart->is_locked ? 'Cart is locked during payment' : 'Cart is active'
             ];
         }
     }
     
     return response()->json($response);
-}
-    
+} 
     // List all pending payments for a device
     public function listPendingPayments($device_id)
     {
