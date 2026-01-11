@@ -15,6 +15,88 @@ use DB;
 
 class HomeController extends Controller
 {
+
+public function success(Request $request)
+{
+    // Ambil parameter dari Midtrans
+    $orderId = $request->get('order_id');
+    $transactionStatus = $request->get('transaction_status');
+    
+    // Cari data transaksi berdasarkan order_id/invoice
+    $sale = Sales::where('invoice_number', $orderId)->first();
+    
+    if (!$sale) {
+        // Fallback: coba ambil dari session atau parameter lain
+        $orderId = $request->get('invoice') ?? session('last_invoice');
+        $sale = Sales::where('invoice_number', $orderId)->first();
+    }
+    
+    $saleData = [];
+    
+    if ($sale) {
+        // Update status jika dari Midtrans callback
+        if ($transactionStatus) {
+            $this->updatePaymentStatus($sale, $transactionStatus);
+        }
+        
+        $saleData = [
+            'invoice' => $sale->invoice_number,
+            'status' => $sale->status,
+            'payment_method' => $sale->payment_method,
+            'total' => $sale->total_amount,
+            'created_at' => $sale->created_at ? $sale->created_at->format('d M Y, H:i') : null,
+            'paid_at' => $sale->paid_at ? $sale->paid_at->format('d M Y, H:i') : null,
+            'paid_amount' => $sale->paid_amount,
+            'change_amount' => $sale->change_amount,
+            'device_id' => $sale->device_id,
+            'is_midtrans' => true,
+            'transaction_status' => $transactionStatus,
+        ];
+    } else {
+        // Fallback untuk demo/development
+        $saleData = [
+            'invoice' => $orderId ?? 'INV-' . date('Ymd-His'),
+            'status' => 'completed',
+            'payment_method' => $request->get('payment_type') ?? 'QRIS',
+            'total' => $request->get('gross_amount') ?? 0,
+            'created_at' => now()->format('d M Y, H:i'),
+            'paid_at' => now()->format('d M Y, H:i'),
+            'paid_amount' => $request->get('gross_amount') ?? 0,
+            'change_amount' => 0,
+            'is_midtrans' => true,
+            'transaction_status' => $transactionStatus,
+        ];
+    }
+    
+    return view('success', $saleData);
+}
+
+private function updatePaymentStatus($sale, $transactionStatus)
+{
+    $statusMap = [
+        'settlement' => 'completed',
+        'capture' => 'completed',
+        'pending' => 'pending',
+        'deny' => 'failed',
+        'cancel' => 'cancelled',
+        'expire' => 'expired',
+        'failure' => 'failed'
+    ];
+    
+    $newStatus = $statusMap[$transactionStatus] ?? 'pending';
+    
+    $updateData = ['status' => $newStatus];
+    
+    if ($newStatus === 'completed') {
+        $updateData['paid_at'] = now();
+        $updateData['paid_amount'] = $sale->total_amount;
+        $updateData['change_amount'] = 0;
+    } elseif ($newStatus === 'failed' || $newStatus === 'expired') {
+        $updateData['failed_at'] = now();
+    }
+    
+    $sale->update($updateData);
+}
  public function index(Request $request)
     {
         $assets = ['chart', 'animation'];

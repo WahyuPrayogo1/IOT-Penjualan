@@ -38,6 +38,8 @@ Route::get('/storage', function () {
     Artisan::call('storage:link');
 });
 
+Route::get('/payment/success', [HomeController::class, 'success'])->name('success');
+
 //UI Pages Routs
 Route::get('/', [HomeController::class, 'uisheet'])->name('uisheet');
 
