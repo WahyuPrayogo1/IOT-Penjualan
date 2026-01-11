@@ -9,52 +9,52 @@ use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-    // Check payment status
-    public function checkStatus($invoice)
-    {
-        $sale = Sales::where('invoice_number', $invoice)->first();
-        
-        if (!$sale) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invoice not found: ' . $invoice
-            ], 404);
-        }
-        
-        $response = [
-            'success' => true,
-            'invoice' => $invoice,
-            'status' => $sale->status,
-            'payment_method' => $sale->payment_method,
-            'total' => (float)$sale->total_amount,
-            'device_id' => $sale->device_id,
-            'created_at' => $sale->created_at->format('Y-m-d H:i:s'),
-        ];
-        
-        // Tambah data berdasarkan status
-        if ($sale->status == 'completed') {
-            $response['paid_at'] = $sale->paid_at->format('Y-m-d H:i:s');
-            $response['paid_amount'] = (float)$sale->paid_amount;
-            $response['change_amount'] = (float)$sale->change_amount;
-        } elseif ($sale->status == 'failed') {
-            $response['failed_at'] = $sale->failed_at->format('Y-m-d H:i:s');
-            $response['reason'] = 'Payment failed';
-        }
-        
-        // Cek cart
-        if ($sale->cart_id) {
-            $cart = Cart::find($sale->cart_id);
-            if ($cart) {
-                $response['cart'] = [
-                    'id' => $cart->id,
-                    'is_locked' => (bool)$cart->is_locked,
-                    'items_count' => $cart->items()->count()
-                ];
-            }
-        }
-        
-        return response()->json($response);
+public function checkStatus($invoice)
+{
+    $sale = Sales::where('invoice_number', $invoice)->first();
+    
+    if (!$sale) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Invoice not found: ' . $invoice
+        ], 404);
     }
+    
+    $response = [
+        'success' => true,
+        'invoice' => $invoice,
+        'status' => $sale->status,
+        'payment_method' => $sale->payment_method,
+        'total' => (float)$sale->total_amount,
+        'device_id' => $sale->device_id,
+        // Gunakan null-safe operator
+        'created_at' => $sale->created_at ? $sale->created_at->format('Y-m-d H:i:s') : null,
+    ];
+    
+    // Tambah data berdasarkan status DENGAN NULL CHECK
+    if ($sale->status == 'completed') {
+        $response['paid_at'] = $sale->paid_at ? $sale->paid_at->format('Y-m-d H:i:s') : null;
+        $response['paid_amount'] = (float)$sale->paid_amount;
+        $response['change_amount'] = (float)$sale->change_amount;
+    } elseif ($sale->status == 'failed') {
+        $response['failed_at'] = $sale->failed_at ? $sale->failed_at->format('Y-m-d H:i:s') : null;
+        $response['reason'] = 'Payment failed';
+    }
+    
+    // Cek cart
+    if ($sale->cart_id) {
+        $cart = Cart::find($sale->cart_id);
+        if ($cart) {
+            $response['cart'] = [
+                'id' => $cart->id,
+                'is_locked' => (bool)$cart->is_locked,
+                'items_count' => $cart->items()->count()
+            ];
+        }
+    }
+    
+    return response()->json($response);
+}
     
     // List all pending payments for a device
     public function listPendingPayments($device_id)
