@@ -70,7 +70,7 @@ public function show($device_id)
     if (!$cart) {
         return response()->json([
             'success' => true,
-            'device_id' => $device_id,  // 👈 TAMBAH INI
+            'device_id' => $device_id,
             'items' => [],
             'total' => 0,
             'cart_id' => null,
@@ -93,17 +93,19 @@ public function show($device_id)
             'price' => $item->product->price,
             'quantity' => $item->quantity,
             'subtotal' => $subtotal,
-            'product_image' => $item->product->image ?? null, // optional
+            'product_image' => $item->product->image ? 
+                url('storage/uploads/products/' . $item->product->image) : 
+                null, // 👈 URL lengkap
         ];
     }
 
     return response()->json([
         'success' => true,
-        'device_id' => $device_id,      // 👈 TAMBAH INI
-        'cart_id' => $cart->id,         // 👈 TAMBAH INI (jika perlu)
+        'device_id' => $device_id,
+        'cart_id' => $cart->id,
         'items' => $items,
         'total' => $total,
-        'items_count' => count($items), // 👈 TAMBAH INI
+        'items_count' => count($items),
         'message' => 'Cart retrieved successfully'
     ]);
 }
